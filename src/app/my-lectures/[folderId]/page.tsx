@@ -56,10 +56,14 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
 
         try {
             const enriched: any = await enrichWord({ word: newWordInput.trim(), context: folder?.name });
-            
-            // Защита от сохранения поломанной карточки при исчерпании лимитов или 503-х ошибках
-            if (enriched?.russian?.includes('Ошибка обогащения AI')) {
-                throw new Error("AI_LIMIT");
+
+            // Защита от сохранения поломанной карточки при ошибках AI (любой природы).
+            // Больше НЕ считаем все ошибки «превышением лимита» — `enrichWord` теперь
+            // возвращает поле `__enrichmentError.kind`, которое чётко разделяет
+            // real rate-limit от прочих сбоев (schema / safety / network).
+            if (enriched?.__enrichmentError || enriched?.russian === 'Ошибка обогащения AI') {
+                const kind = enriched?.__enrichmentError?.kind;
+                throw new Error(kind === 'rate_limit' ? 'AI_LIMIT' : 'AI_ERROR');
             }
 
             const newWord: UserVocabularyWord = {
@@ -77,11 +81,20 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
             setNewWordInput('');
         } catch (err: any) {
             console.error("Failed to add word:", err);
-            // Check for known AI limits or standard 429 errors from Google GenAI
-            if (err.message?.includes('429') || err.message?.includes('quota') || err.message === 'AI_LIMIT') {
+            // Показываем сообщение про лимит ТОЛЬКО при реальном 429 от Google AI,
+            // а не при любом сбое (schema, safety filter, сеть), как было раньше.
+            const msg: string = err?.message || '';
+            const isRealRateLimit =
+                msg === 'AI_LIMIT' ||
+                /\b429\b/.test(msg) ||
+                /RESOURCE_EXHAUSTED/i.test(msg) ||
+                /rateLimitExceeded/i.test(msg) ||
+                /quota exceeded/i.test(msg);
+
+            if (isRealRateLimit) {
                 setError("Лимит AI исчерпан. Пожалуйста, подождите минуту перед добавлением новых слов.");
             } else {
-                setError("Не удалось добавить слово. Проверьте соединение.");
+                setError("Не удалось добавить слово. Проверьте соединение или попробуйте ещё раз.");
             }
         } finally {
             setIsAdding(false);
@@ -109,10 +122,17 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
     const handleRefreshWord = async (userWord: UserVocabularyWord) => {
         try {
             const german = userWord.word.german;
-            const enriched = await enrichWord({
+            const enriched: any = await enrichWord({
                 word: german,
                 context: `Focus on B2 Beruf primary meaning. Folder: ${folder?.name}`
             });
+
+            // If the flow returned its error sentinel, surface the real kind of error
+            // (rate-limit vs generic) instead of silently saving a broken card.
+            if (enriched?.__enrichmentError || enriched?.russian === 'Ошибка обогащения AI') {
+                const kind = enriched?.__enrichmentError?.kind;
+                throw new Error(kind === 'rate_limit' ? 'AI_LIMIT' : 'AI_ERROR');
+            }
 
             // Robust mapping of AI fields to our internal types
             const baseWordData: any = {
@@ -145,7 +165,14 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
             updateWordInFolder(folderId, updatedWord);
         } catch (e: any) {
             console.error("Refresh failed", e);
-            if (e.message?.includes('429') || e.message?.includes('quota')) {
+            const msg: string = e?.message || '';
+            if (
+                msg === 'AI_LIMIT' ||
+                /\b429\b/.test(msg) ||
+                /RESOURCE_EXHAUSTED/i.test(msg) ||
+                /rateLimitExceeded/i.test(msg) ||
+                /quota exceeded/i.test(msg)
+            ) {
                 throw new Error("AI_LIMIT");
             }
             throw e;

@@ -84,14 +84,19 @@ export function cleanTextForSpeech(text: string): string {
 
     // 4. Strip leftover markdown symbols (*, _, ~, `, #), slashes and vertical bars
     cleaned = cleaned.replace(/[*_~`#/|]/g, ' ');
-    
-    // 5. Clean up multiple spaces and dashes
+
+    // 5. Clean up multiple spaces, dashes, and stray spaces before punctuation
     cleaned = cleaned.replace(/[-]{2,}/g, ' ');
+    cleaned = cleaned.replace(/\s+([.,!?;:])/g, '$1');
     cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
 
-    // 6. Safe limit: browser TTS often crashes on strings > 200 chars (e.g. error dumps)
-    if (cleaned.length > 150) {
-        cleaned = cleaned.substring(0, 150) + "...";
+    // 6. Safety cap: guard against runaway strings (e.g. an entire error dump) while
+    //    still allowing full sentences. The chunking logic in `useSpeech.speak` will
+    //    split anything longer than ~150 chars into sentence-sized utterances so
+    //    truncating here caused long examples to be cut off mid-phrase.
+    const MAX_SPEECH_CHARS = 3000;
+    if (cleaned.length > MAX_SPEECH_CHARS) {
+        cleaned = cleaned.substring(0, MAX_SPEECH_CHARS);
     }
 
     return cleaned;

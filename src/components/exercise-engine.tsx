@@ -228,8 +228,14 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     } catch (error: any) {
       console.error("Error starting exercise cycle:", error);
 
-      const isQuotaError = error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('Resource has been exhausted');
-      const isTimeout = error.message === 'AI_TIMEOUT';
+      const msg: string = error?.message || '';
+      const isQuotaError =
+        /\b429\b/.test(msg) ||
+        /RESOURCE_EXHAUSTED/i.test(msg) ||
+        /Resource has been exhausted/i.test(msg) ||
+        /rateLimitExceeded/i.test(msg) ||
+        /quota exceeded/i.test(msg);
+      const isTimeout = msg === 'AI_TIMEOUT';
 
       if (isQuotaError) {
         setApiError("Превышен лимит запросов к AI (429). Система автоматически попробует переподключиться, но если ошибка сохраняется — сделайте паузу.");
@@ -509,7 +515,13 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     } catch (error: any) {
       console.error("Error submitting answer:", error);
 
-      const isQuotaError = error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('Resource has been exhausted');
+      const msg: string = error?.message || '';
+      const isQuotaError =
+        /\b429\b/.test(msg) ||
+        /RESOURCE_EXHAUSTED/i.test(msg) ||
+        /Resource has been exhausted/i.test(msg) ||
+        /rateLimitExceeded/i.test(msg) ||
+        /quota exceeded/i.test(msg);
 
       if (isQuotaError) {
         setApiError("Превышен лимит запросов к AI. Пожалуйста, подождите немного или попробуйте позже.");
