@@ -1,7 +1,7 @@
 
 'use client';
 
-import { StudyQueueItem } from '@/lib/types';
+import { StudyQueueItem, VocabularyWord } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { formatGermanWord, getGenderColorClass } from '@/lib/german-utils';
@@ -19,9 +19,28 @@ interface RecognitionViewProps {
     onResult: (result: 'success' | 'fail', confusedWithId?: string) => void;
     onMarkAsKnown: () => void;
     direction?: 0 | 1; // 0 = DE->RU, 1 = RU->DE
+    /**
+     * Pool of StudyQueueItems (current batch / current session / known folders)
+     * from which to draw distractors BEFORE falling back to the static
+     * `commonWords` seed list. Prioritises words the learner actually knows,
+     * which makes the multiple-choice trial much more diagnostic.
+     */
+    distractorPool?: StudyQueueItem[];
+    /**
+     * Audio-first recognition: the prompt word is hidden until the user
+     * answers, forcing reliance on the spoken form. Most useful for B1+.
+     */
+    audioFirst?: boolean;
 }
 
-export function RecognitionView({ item, onResult, onMarkAsKnown, direction: forcedDirection }: RecognitionViewProps) {
+export function RecognitionView({
+    item,
+    onResult,
+    onMarkAsKnown,
+    direction: forcedDirection,
+    distractorPool,
+    audioFirst,
+}: RecognitionViewProps) {
     const { word } = item;
     const [selectedOption, setSelectedOption] = useState<string | null>(null);
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
@@ -48,26 +67,85 @@ export function RecognitionView({ item, onResult, onMarkAsKnown, direction: forc
     }, [speak, word, isLoaded, direction]);
 
     const options = useMemo(() => {
-        // 1. Identification of "confusion partners"
-        const confusedWordIds = Object.keys(item.confusedWith || {})
+        const correct = direction === 0 ? word.russian : formatGermanWord(word);
+        const renderOption = (w: VocabularyWord | undefined | null): string | null => {
+            if (!w) return null;
+            const value = direction === 0 ? w.russian : formatGermanWord(w);
+            if (!value) return null;
+            if (value === correct) return null;
+            return value;
+        };
+
+        const seen = new Set<string>([correct]);
+        const pushUnique = (bucket: string[], candidate: string | null) => {
+            if (!candidate) return;
+            if (seen.has(candidate)) return;
+            seen.add(candidate);
+            bucket.push(candidate);
+        };
+
+        const pool = (distractorPool || []).filter(it => it.word && it.id !== item.id);
+
+        // 1. "Confusion partners": words the learner has actually mistaken for this one.
+        const confusedIds = Object.keys(item.confusedWith || {})
             .sort((a, b) => (item.confusedWith![b] || 0) - (item.confusedWith![a] || 0))
             .slice(0, 2);
+        const confusionDistractors: string[] = [];
+        confusedIds.forEach(cid => {
+            const fromPool = pool.find(p => p.id === cid || p.word.german === cid);
+            const fromCommon = commonWords.find(cw => cw.german === cid);
+            pushUnique(confusionDistractors, renderOption(fromPool?.word || fromCommon));
+        });
 
-        const confusedWords = commonWords.filter(w => confusedWordIds.includes(w.german));
-        const confusionDistractors = confusedWords.map(w => direction === 0 ? w.russian : formatGermanWord(w));
+        // 2. Words from the same batch / session — highest "discrimination" value.
+        const sameBatch = pool
+            .filter(it => !confusedIds.includes(it.id) && !confusedIds.includes(it.word.german))
+            .sort(() => Math.random() - 0.5);
+        const batchDistractors: string[] = [];
+        for (const it of sameBatch) {
+            if (batchDistractors.length >= 3) break;
+            pushUnique(batchDistractors, renderOption(it.word));
+        }
 
-        // 2. Random distractors to fill seats
-        const needed = 3 - confusionDistractors.length;
-        const randomDistractors = commonWords
-            .filter(w => w.german !== word.german && !confusedWordIds.includes(w.german))
-            .sort(() => Math.random() - 0.5)
-            .slice(0, needed)
-            .map(w => direction === 0 ? w.russian : formatGermanWord(w));
+        // 3. Same morpheme / type / level — builds meaningful contrast.
+        const relatedDistractors: string[] = [];
+        if (confusionDistractors.length + batchDistractors.length < 3) {
+            const sameRoot = pool.filter(it =>
+                word.root && it.word.root && it.word.root === word.root && it.word.german !== word.german
+            );
+            const sameType = pool.filter(it =>
+                it.word.type === word.type && it.word.german !== word.german
+            );
+            const pooled = [...sameRoot, ...sameType]
+                .sort(() => Math.random() - 0.5);
+            for (const it of pooled) {
+                if (confusionDistractors.length + batchDistractors.length + relatedDistractors.length >= 3) break;
+                pushUnique(relatedDistractors, renderOption(it.word));
+            }
+        }
 
-        const correct = direction === 0 ? word.russian : formatGermanWord(word);
-        const allOptions = [...confusionDistractors, ...randomDistractors, correct].sort(() => Math.random() - 0.5);
-        return allOptions;
-    }, [word, direction, item.confusedWith]);
+        // 4. Fallback to the static seed vocabulary.
+        const randomDistractors: string[] = [];
+        const needed = 3 - confusionDistractors.length - batchDistractors.length - relatedDistractors.length;
+        if (needed > 0) {
+            const seed = commonWords
+                .filter(w => w.german !== word.german && !confusedIds.includes(w.german))
+                .sort(() => Math.random() - 0.5);
+            for (const w of seed) {
+                if (randomDistractors.length >= needed) break;
+                pushUnique(randomDistractors, renderOption(w));
+            }
+        }
+
+        const allOptions = [
+            ...confusionDistractors,
+            ...batchDistractors,
+            ...relatedDistractors,
+            ...randomDistractors,
+            correct,
+        ];
+        return allOptions.sort(() => Math.random() - 0.5);
+    }, [word, direction, item.id, item.confusedWith, distractorPool]);
 
     const handleSelect = async (option: string) => {
         if (selectedOption || showSuccess) return;
@@ -215,7 +293,23 @@ export function RecognitionView({ item, onResult, onMarkAsKnown, direction: forc
 
                     <div className="flex flex-col items-center gap-1 mb-4">
                         <div className="text-4xl font-black tracking-tighter text-white h-[48px] flex items-center">
-                            {direction === 0 ? <FormattedGermanWord word={word} /> : word.russian}
+                            {audioFirst && !selectedOption && !showSuccess ? (
+                                <button
+                                    type="button"
+                                    onClick={() => direction === 0
+                                        ? speak(formatGermanWord(word), 'de-DE')
+                                        : speak(word.russian, 'ru-RU')}
+                                    className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl px-5 py-2 transition-colors"
+                                    aria-label="Воспроизвести слово повторно"
+                                >
+                                    <BrainCircuit className="h-5 w-5 text-primary animate-pulse" />
+                                    <span className="text-sm font-bold uppercase tracking-[0.25em] text-primary/70">
+                                        Слушайте и выбирайте
+                                    </span>
+                                </button>
+                            ) : (
+                                direction === 0 ? <FormattedGermanWord word={word} /> : word.russian
+                            )}
                         </div>
                         {/* Governance Section (Rektion) as Hint */}
                         {((word.type === 'verb' || word.type === 'adjective') && word.governance && word.governance.length > 0) && (

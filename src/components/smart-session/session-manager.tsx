@@ -778,6 +778,8 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                                         handleNext('success');
                                     }}
                                     direction={(recognitionHits[currentItem.id] || 0) % 2 === 0 ? 0 : 1}
+                                    distractorPool={sessionQueue}
+                                    audioFirst={!!settings.audioFirst}
                                 />
                             </div>
                         )}

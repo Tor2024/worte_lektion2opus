@@ -22,10 +22,17 @@ export type ProgressData = { [key: string]: number };
 
 export interface AppSettings {
     productionMode: 'full' | 'cloze' | 'skip';
+    /**
+     * Audio-first recognition: hide the prompt word until the user answers,
+     * so they must rely on the spoken form. Strengthens listening/retrieval
+     * at B1+ where orthography is no longer the main cue.
+     */
+    audioFirst?: boolean;
 }
 
 const defaultSettings: AppSettings = {
-    productionMode: 'full'
+    productionMode: 'full',
+    audioFirst: false,
 };
 
 // In-memory cache for synchronous reads

@@ -406,7 +406,20 @@ export function useStudyQueue() {
             }
         }
 
-        const nextDate = Date.now() + (1000 * 60 * 60 * 24 * nextInterval);
+        // Jitter on longer intervals (>= 14 days): ±15% uniform noise.
+        // Without it, a batch of words promoted on the same day all come back
+        // on exactly the same future day — defeating distributed practice and
+        // causing "review cliffs". Short intervals stay exact so daily/weekly
+        // rhythms remain predictable.
+        let effectiveInterval = nextInterval;
+        if (result === 'success' && nextInterval >= 14) {
+            const jitter = (Math.random() * 0.3) - 0.15; // [-0.15, +0.15]
+            effectiveInterval = Math.max(
+                Math.round(nextInterval * 0.85),
+                Math.round(nextInterval * (1 + jitter)),
+            );
+        }
+        const nextDate = Date.now() + (1000 * 60 * 60 * 24 * effectiveInterval);
 
         const nextQueue = localQueue.map((i: StudyQueueItem) =>
             i.id === wordId

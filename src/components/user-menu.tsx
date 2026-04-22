@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useSettings } from "@/hooks/use-settings";
 
 export function UserMenu() {
@@ -198,6 +199,26 @@ export function UserMenu() {
                                 </Label>
                             </div>
                         </RadioGroup>
+                    </div>
+
+                    <div className="py-2 border-t mt-2 pt-4">
+                        <Label className="text-sm font-bold block mb-3">Режим распознавания</Label>
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="flex flex-col gap-1 flex-1">
+                                <span className="font-bold text-sm flex items-center gap-2">
+                                    Аудио-первый режим
+                                    <span className="bg-indigo-100 text-indigo-800 text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">B1+</span>
+                                </span>
+                                <span className="font-normal text-xs text-muted-foreground leading-relaxed">
+                                    В фазе распознавания сначала звучит слово, а написание скрыто до выбора ответа — тренирует слуховое извлечение из памяти.
+                                </span>
+                            </div>
+                            <Switch
+                                checked={!!settings.audioFirst}
+                                onCheckedChange={(checked) => updateSettings({ audioFirst: checked })}
+                                aria-label="Аудио-первый режим"
+                            />
+                        </div>
                     </div>
 
                     <div className="py-2 border-t mt-2 pt-4">
