@@ -226,7 +226,14 @@ export function useCustomFolders() {
             } catch (e: any) {
                 retryCount++;
                 const errorMessage = (e as Error).message || "";
-                const isRateLimit = errorMessage.includes("429") || errorMessage.toLowerCase().includes("quota");
+                // Only treat as rate-limit when the Google API actually reports 429 /
+                // RESOURCE_EXHAUSTED. A bare "quota" substring in a fallback message
+                // used to trigger a 25-second pause for unrelated errors.
+                const isRateLimit =
+                    /\b429\b/.test(errorMessage) ||
+                    /RESOURCE_EXHAUSTED/i.test(errorMessage) ||
+                    /rateLimitExceeded/i.test(errorMessage) ||
+                    /quota exceeded/i.test(errorMessage);
 
                 console.error(`Batch failed at index ${i} (attempt ${retryCount}/${MAX_RETRIES_PER_BATCH})`, e);
                 

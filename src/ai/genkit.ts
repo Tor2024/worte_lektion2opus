@@ -67,6 +67,32 @@ export const ai = new Proxy({} as any, {
 export const aiStable = ai;
 
 /**
+ * Detects whether an error from Google GenAI/Genkit is actually a rate-limit / quota
+ * exhaustion, as opposed to some other error whose message happens to contain the
+ * word "quota" (e.g. our own fallback strings). Tightening this check avoids
+ * false-positive "AI limit exceeded" messages in the UI.
+ */
+export const isGoogleAIRateLimitError = (error: any): boolean => {
+  if (!error) return false;
+  const status =
+    error.status ||
+    error.code ||
+    (error.response ? error.response.status : null);
+  if (status === 429) return true;
+
+  const rawMsg: string = error.message || String(error) || '';
+  // Only trust explicit Google API markers, not generic occurrences of "quota".
+  return (
+    /\b429\b/.test(rawMsg) ||
+    /RESOURCE_EXHAUSTED/i.test(rawMsg) ||
+    /rateLimitExceeded/i.test(rawMsg) ||
+    /quotaExceeded/i.test(rawMsg) ||
+    /quota exceeded/i.test(rawMsg) ||
+    /too many requests/i.test(rawMsg)
+  );
+};
+
+/**
  * Executes an AI operation with aggressive round-robin retries across all available keys.
  */
 export const executeWithRetry = async <T>(
@@ -76,9 +102,10 @@ export const executeWithRetry = async <T>(
     throw new Error("No Genkit instances available. Please check your environment variables.");
   }
 
-  // Optimize attempts. We don't want to spam 30 requests if the model is failing.
-  // We'll try at most the number of keys we have, capped at 5 total attempts to prevent 90s hangs.
-  const MAX_ATTEMPTS = Math.min(aiInstances.length, 5); 
+  // Optimize attempts: try every available key once, capped at 8 to prevent long hangs.
+  // Previously this was capped at 5 even when more keys existed, which could make
+  // transient errors look like "limits exceeded" when they were just bad luck.
+  const MAX_ATTEMPTS = Math.min(aiInstances.length, 8);
   let lastError: any;
 
   // Start at a random key to distribute load
@@ -99,14 +126,14 @@ export const executeWithRetry = async <T>(
 
       console.error(`[AI] Key #${index} failed with error (status: ${status}):`, msg.substring(0, 200));
 
-      // 400 Bad Request, Validation Errors. No point in retrying across keys.
-      if (status === 400 || msg.includes('parse') || msg.includes('validation')) {
-         throw error;
+      // 400 Bad Request, Validation/Parse Errors. No point in retrying across keys.
+      if (status === 400 || /parse/i.test(msg) || /validation/i.test(msg) || /schema/i.test(msg)) {
+        throw error;
       }
 
-      // If it's a quota/rate limit error, rotate instantly
-      if (status === 429 || msg.includes('429') || msg.toLowerCase().includes('quota')) {
-        console.warn(`[AI] Key #${index} hit quota limit (429). Rotating to next available key...`);
+      // Real rate-limit / quota error: rotate instantly to the next key.
+      if (isGoogleAIRateLimitError(error)) {
+        console.warn(`[AI] Key #${index} hit real quota/rate-limit (429/RESOURCE_EXHAUSTED). Rotating to next available key...`);
         continue;
       }
 

@@ -67,18 +67,21 @@ export function useSpeech() {
         const cleanedText = cleanTextForSpeech(text);
         if (!cleanedText) return;
 
-        // CHUNKING LOGIC: If text is long, split by sentences and speak them sequentially
-        if (cleanedText.length > 200) {
-            const chunks = cleanedText.match(/[^.!?]+[.!?]*/g) || [cleanedText];
+        // CHUNKING LOGIC: If text is long, split by sentence-like boundaries and speak them sequentially.
+        // Browser TTS engines (esp. Chromium) become unreliable on very long utterances, so we prefer
+        // many short utterances over one big one.
+        if (cleanedText.length > 150) {
+            const rawChunks = cleanedText.match(/[^.!?…\n;]+[.!?…\n;]*/g) || [cleanedText];
+            const chunks = rawChunks.map(c => c.trim()).filter(Boolean);
             if (chunks.length > 1) {
                 if (cancelFirst) stop();
                 const currentId = sequenceIdRef.current;
-                
+
                 for (const chunk of chunks) {
                     // Stop if a new speak or stop operation started
                     if (sequenceIdRef.current !== currentId) break;
-                    
-                    await speak(chunk.trim(), lang, gender, false);
+
+                    await speak(chunk, lang, gender, false);
                     await new Promise(r => setTimeout(r, 150));
                 }
                 return;

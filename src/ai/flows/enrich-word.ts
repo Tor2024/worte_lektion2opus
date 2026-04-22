@@ -1,6 +1,6 @@
 'use server';
 
-import { ai, executeWithRetry } from '@/ai/genkit';
+import { ai, executeWithRetry, isGoogleAIRateLimitError } from '@/ai/genkit';
 import { z } from 'genkit';
 
 const WordEnrichmentInputSchema = z.object({
@@ -128,28 +128,42 @@ export async function enrichWord(input: WordEnrichmentInput): Promise<EnrichedWo
                 prompt: renderPrompt(input),
                 output: { schema: EnrichedWordSchema },
             });
-            
+
             if (!output) {
-                throw new Error("AI returned an empty response. This might be a quota issue or a temporary Google API error.");
+                // Do NOT mention "quota" in this message: empty-output can be caused by
+                // safety filters, schema mismatches, or transient API hiccups, and a
+                // misleading word here was being matched by front-end rate-limit checks
+                // and shown to users as "лимит AI исчерпан".
+                throw new Error("AI returned an empty response.");
             }
-            
+
             return output as EnrichedWordOutput;
         });
     } catch (err: any) {
         console.error("[AI Flow Error]:", err);
-        
-        // Fallback object to show the error clearly in the UI instead of a 500 error
+
+        const isRateLimit = isGoogleAIRateLimitError(err);
+        const reason = isRateLimit
+            ? "Google AI временно ограничил запросы (429). Подождите минуту и попробуйте снова."
+            : `Не удалось обратиться к AI: ${err.message || "неизвестная ошибка"}.`;
+
+        // Fallback object to show the error clearly in the UI instead of a 500 error.
+        // The `__enrichmentError` field lets the UI distinguish a real AI rate-limit
+        // from a generic failure (schema/network/safety) without string matching.
         return {
             german: input.word,
             russian: "Ошибка обогащения AI",
-            allTranslations: `ОШИБКА: ${err.message || "Непредвиденная проблема с ИИ"}. 
-Убедитесь, что в Vercel добавлены ключи GEMINI_API_KEY и лимиты не превышены.`,
+            allTranslations: reason,
             type: 'other',
             // Defaulting needed fields to avoid frontend crashes
             meaning: "Ошибка на стороне сервера",
             synonyms: [],
             antonyms: [],
-            governance: []
+            governance: [],
+            __enrichmentError: {
+                kind: isRateLimit ? 'rate_limit' : 'generic',
+                message: err.message || 'unknown',
+            },
         } as any;
     }
 }
