@@ -147,6 +147,18 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
 
     const totalBatches = Math.ceil(sessionQueue.length / BATCH_SIZE);
 
+    // Words actually shown during the current Priming sub-phase. We mirror the
+    // smart-skip filter from `currentItem` so the counter doesn't display
+    // "1/4" when only 2 of 4 words actually visit Priming this session.
+    // NOTE: must live above the early returns below — React requires a stable
+    // hook count across renders.
+    const primingWords = useMemo(() => currentBatchWords.filter(w => {
+        const isNew = w.status === 'new';
+        const isRefresh = refreshWords.has(w.id);
+        const isShortInterval = (w.interval || 0) < 7;
+        return isNew || isRefresh || isShortInterval;
+    }), [currentBatchWords, refreshWords]);
+
     // Derived: Current item based on phaseIndex within current batch
     const currentItem = useMemo(() => {
         if (currentPhase === 'priming') {
@@ -722,16 +734,6 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
     };
 
     const progressValue = ((currentBatchIndex * 3 + (currentPhase === 'priming' ? 0 : currentPhase === 'recognition' ? 1 : 2)) / (totalBatches * 3)) * 100;
-
-    // Words actually shown during the current Priming sub-phase. We mirror the
-    // smart-skip filter from `currentItem` so the counter doesn't display
-    // "1/4" when only 2 of 4 words actually visit Priming this session.
-    const primingWords = useMemo(() => currentBatchWords.filter(w => {
-        const isNew = w.status === 'new';
-        const isRefresh = refreshWords.has(w.id);
-        const isShortInterval = (w.interval || 0) < 7;
-        return isNew || isRefresh || isShortInterval;
-    }), [currentBatchWords, refreshWords]);
 
     // Phase relative progress
     const phaseProgressValue = currentPhase === 'priming'
