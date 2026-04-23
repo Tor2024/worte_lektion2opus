@@ -31,6 +31,18 @@ interface RecognitionViewProps {
      * answers, forcing reliance on the spoken form. Most useful for B1+.
      */
     audioFirst?: boolean;
+    /**
+     * Presentation format:
+     *  - 'mcq'   (default): classic prompt-word + 4 options.
+     *  - 'cloze': show the example sentence with the target word blanked out.
+     *             Options stay the same; format change alone adds variety and
+     *             engages context memory (addresses boredom without adding
+     *             new pedagogical steps).
+     *
+     * Automatically falls back to 'mcq' if 'cloze' is requested but the word
+     * has no usable context sentence.
+     */
+    format?: 'mcq' | 'cloze';
 }
 
 export function RecognitionView({
@@ -40,6 +52,7 @@ export function RecognitionView({
     direction: forcedDirection,
     distractorPool,
     audioFirst,
+    format = 'mcq',
 }: RecognitionViewProps) {
     const { word } = item;
     const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -52,10 +65,31 @@ export function RecognitionView({
         return () => stop();
     }, [item.id, stop]);
 
-    // If forcedDirection is provided, use it. Otherwise, fallback to random (for standalone usage).
-    const direction = useMemo(() =>
-        forcedDirection !== undefined ? forcedDirection : (Math.random() > 0.5 ? 1 : 0),
-        [item.id, forcedDirection]);
+    // Cloze mode only makes sense when we have an example sentence AND the
+    // target word actually appears in it in a form we can mask. Otherwise we
+    // transparently fall back to plain MCQ. For nouns we also try the
+    // `exampleSingular` variant.
+    const clozeSentence = useMemo(() => {
+        if (format !== 'cloze') return null;
+        const ctx = word.example || (word.type === 'noun' ? word.exampleSingular : undefined);
+        const german = (word.german || '').replace(/^(der|die|das)\s+/i, '');
+        if (!ctx || !german) return null;
+        // Case-insensitive replace of the first occurrence of the base word
+        // (allow a simple suffix for inflected forms: durchsetzen → durchsetzt).
+        const escaped = german.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${escaped}\\w*`, 'i');
+        if (!re.test(ctx)) return null;
+        return ctx.replace(re, '______');
+    }, [format, word]);
+    const clozeTranslation = word.exampleMeaning;
+    const effectiveFormat: 'mcq' | 'cloze' = clozeSentence ? 'cloze' : 'mcq';
+
+    // Cloze forces options to be German (user fills the German blank).
+    // For plain MCQ, fall back to caller-provided direction or random.
+    const direction = useMemo<0 | 1>(() => {
+        if (effectiveFormat === 'cloze') return 1;
+        return forcedDirection !== undefined ? forcedDirection : ((Math.random() > 0.5 ? 1 : 0) as 0 | 1);
+    }, [item.id, forcedDirection, effectiveFormat]);
 
     useEffect(() => {
         if (!isLoaded) return;
@@ -288,29 +322,44 @@ export function RecognitionView({
 
                 <CardContent className="p-6 sm:p-8 flex flex-col items-center text-center relative z-10 pt-10">
                     <div className="text-[10px] font-bold text-primary/60 mb-2 uppercase tracking-widest">
-                        {direction === 0 ? "Понимаете ли вы это слово?" : "Как это будет по-немецки?"}
+                        {effectiveFormat === 'cloze'
+                            ? "Какое слово пропущено?"
+                            : direction === 0 ? "Понимаете ли вы это слово?" : "Как это будет по-немецки?"}
                     </div>
 
                     <div className="flex flex-col items-center gap-1 mb-4">
-                        <div className="text-4xl font-black tracking-tighter text-white h-[48px] flex items-center">
-                            {audioFirst && !selectedOption && !showSuccess ? (
-                                <button
-                                    type="button"
-                                    onClick={() => direction === 0
-                                        ? speak(formatGermanWord(word), 'de-DE')
-                                        : speak(word.russian, 'ru-RU')}
-                                    className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl px-5 py-2 transition-colors"
-                                    aria-label="Воспроизвести слово повторно"
-                                >
-                                    <BrainCircuit className="h-5 w-5 text-primary animate-pulse" />
-                                    <span className="text-sm font-bold uppercase tracking-[0.25em] text-primary/70">
-                                        Слушайте и выбирайте
-                                    </span>
-                                </button>
-                            ) : (
-                                direction === 0 ? <FormattedGermanWord word={word} /> : word.russian
-                            )}
-                        </div>
+                        {effectiveFormat === 'cloze' ? (
+                            <div className="text-lg sm:text-xl md:text-2xl font-semibold leading-snug text-white max-w-xl text-center">
+                                <span className="italic">
+                                    «{clozeSentence}»
+                                </span>
+                                {clozeTranslation && (
+                                    <div className="text-xs font-normal text-slate-400 mt-2 not-italic">
+                                        — {clozeTranslation}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="text-4xl font-black tracking-tighter text-white h-[48px] flex items-center">
+                                {audioFirst && !selectedOption && !showSuccess ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => direction === 0
+                                            ? speak(formatGermanWord(word), 'de-DE')
+                                            : speak(word.russian, 'ru-RU')}
+                                        className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl px-5 py-2 transition-colors"
+                                        aria-label="Воспроизвести слово повторно"
+                                    >
+                                        <BrainCircuit className="h-5 w-5 text-primary animate-pulse" />
+                                        <span className="text-sm font-bold uppercase tracking-[0.25em] text-primary/70">
+                                            Слушайте и выбирайте
+                                        </span>
+                                    </button>
+                                ) : (
+                                    direction === 0 ? <FormattedGermanWord word={word} /> : word.russian
+                                )}
+                            </div>
+                        )}
                         {/* Governance Section (Rektion) as Hint */}
                         {((word.type === 'verb' || word.type === 'adjective') && word.governance && word.governance.length > 0) && (
                             <div className="flex flex-col items-center gap-1.5 mt-2 w-full max-w-[280px]">

@@ -792,6 +792,12 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                                     direction={(recognitionHits[currentItem.id] || 0) % 2 === 0 ? 0 : 1}
                                     distractorPool={sessionQueue}
                                     audioFirst={!!settings.audioFirst}
+                                    // Variety: first hit is classic MCQ (DE→RU), second hit
+                                    // uses cloze over the example sentence so the learner
+                                    // meets the word in its natural context instead of
+                                    // answering the same shape twice in a row. Cloze
+                                    // transparently falls back to MCQ if no example exists.
+                                    format={(recognitionHits[currentItem.id] || 0) % 2 === 1 ? 'cloze' : 'mcq'}
                                 />
                             </div>
                         )}
