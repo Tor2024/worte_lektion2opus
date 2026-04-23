@@ -182,9 +182,11 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
     // Parallel batch processing: we fan out enrich calls in small chunks so the
     // Gemini key-pool can be exercised in parallel instead of strictly serially.
     // Previously we waited for each word to finish (~8s avg * N words). With a
-    // pool of 15-20 keys available, running CHUNK_SIZE requests concurrently
-    // gives a near-linear speed-up without exhausting any single key's RPM.
-    const CHUNK_SIZE = 4;
+    // pool of 15+ keys available, running CHUNK_SIZE requests concurrently
+    // gives a near-linear speed-up without exhausting any single key's RPM
+    // (Gemini free tier is 15 RPM per key, so 8 concurrent across 15 keys is
+    // comfortable and leaves headroom for retries / other enrich paths).
+    const CHUNK_SIZE = 8;
     const processBatchQueue = async (wordsToProcess: UserVocabularyWord[], _startIndex: number = 0, _initialSkipped: number = 0) => {
         let completed = 0;
         let skipped = 0;
