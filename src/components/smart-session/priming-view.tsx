@@ -171,8 +171,8 @@ export function PrimingView({ item, onNext, onMarkAsKnown, isRefresh }: PrimingV
                 <BrainCircuit className="h-4 w-4" />
                 <span>{isRefresh ? '🔄 Повторная Загрузка' : 'Фаза 1: Загрузка Образа'}</span>
                 {(item.consecutiveMistakes || 0) >= 3 && (
-                    <Badge variant="destructive" className="ml-2 animate-pulse flex gap-1 items-center">
-                        <Siren className="h-3 w-3" /> Сложное Слово (Leech)
+                    <Badge variant="outline" className="ml-2 flex gap-1 items-center border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                        <Siren className="h-3 w-3" /> Сложное слово
                     </Badge>
                 )}
                 {word.level && (
@@ -564,9 +564,12 @@ export function PrimingView({ item, onNext, onMarkAsKnown, isRefresh }: PrimingV
                 </CardContent>
             </Card>
 
-            <div className="w-full max-w-sm space-y-4">
+            {/* Sticky CTA: keep the primary action visible even when the priming
+                card grows tall (decomposition + verb family + cluster + collocations
+                + mnemonic can easily push 1500px on a single card). */}
+            <div className="sticky bottom-0 z-20 w-full max-w-sm space-y-3 px-2 pb-3 pt-3 bg-gradient-to-t from-background via-background/95 to-transparent backdrop-blur supports-[backdrop-filter]:bg-background/70">
                 <div className="flex flex-col gap-2">
-                    <Button size="lg" className="w-full h-16 text-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg" onClick={onNext}>
+                    <Button size="lg" className="w-full h-14 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg" onClick={onNext}>
                         Запомнил
                     </Button>
                     <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-green-600 hover:bg-green-50" onClick={onMarkAsKnown}>
@@ -574,7 +577,7 @@ export function PrimingView({ item, onNext, onMarkAsKnown, isRefresh }: PrimingV
                     </Button>
                 </div>
                 <p className="text-xs text-center text-muted-foreground opacity-70">
-                    Нажмите, когда четко представите образ слова.
+                    Нажмите, когда чётко представите образ слова.
                 </p>
             </div>
         </motion.div>

@@ -710,9 +710,19 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
 
     const progressValue = ((currentBatchIndex * 3 + (currentPhase === 'priming' ? 0 : currentPhase === 'recognition' ? 1 : 2)) / (totalBatches * 3)) * 100;
 
+    // Words actually shown during the current Priming sub-phase. We mirror the
+    // smart-skip filter from `currentItem` so the counter doesn't display
+    // "1/4" when only 2 of 4 words actually visit Priming this session.
+    const primingWords = useMemo(() => currentBatchWords.filter(w => {
+        const isNew = w.status === 'new';
+        const isRefresh = refreshWords.has(w.id);
+        const isShortInterval = (w.interval || 0) < 7;
+        return isNew || isRefresh || isShortInterval;
+    }), [currentBatchWords, refreshWords]);
+
     // Phase relative progress
     const phaseProgressValue = currentPhase === 'priming'
-        ? (phaseIndex / (currentBatchWords.length || 1)) * 100
+        ? (phaseIndex / (primingWords.length || 1)) * 100
         : currentPhase === 'recognition'
             ? (currentBatchWords.filter(w => (recognitionHits[w.id] || 0) >= 2).length / (currentBatchWords.length || 1)) * 100
             : (phaseIndex / (currentBatchWords.length || 1)) * 100;
@@ -733,7 +743,9 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                     <Badge variant="outline" className="font-mono">
                         {currentPhase === 'recognition'
                             ? `${currentBatchWords.filter(w => (recognitionHits[w.id] || 0) >= 2).length} / ${currentBatchWords.length} ГОТОВО`
-                            : `${Math.min(phaseIndex + 1, currentBatchWords.length)} / ${currentBatchWords.length}`
+                            : currentPhase === 'priming'
+                                ? `${Math.min(phaseIndex + 1, primingWords.length || 1)} / ${primingWords.length || currentBatchWords.length}`
+                                : `${Math.min(phaseIndex + 1, currentBatchWords.length)} / ${currentBatchWords.length}`
                         }
                     </Badge>
                 </div>
