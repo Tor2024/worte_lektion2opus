@@ -120,10 +120,32 @@ const renderPrompt = (input: WordEnrichmentInput) => {
   Return ONLY valid JSON matching the schema.`;
 };
 
+/**
+ * Server-side in-memory cache for enrichment results.
+ * Key: `${word.toLowerCase().trim()}|${context ?? ''}`.
+ * The Gemini response for a given (word, context) is deterministic enough that
+ * a second call within a dev/session lifetime is wasted latency (~8s avg).
+ * This cache dramatically reduces perceived latency when the same word is added
+ * to another folder or re-enriched, and shaves Gemini quota on repeated use.
+ *
+ * Only SUCCESSFUL enrichments are cached; error fallbacks intentionally are not.
+ */
+const enrichmentCache = new Map<string, EnrichedWordOutput>();
+const CACHE_MAX_ENTRIES = 500;
+
+const cacheKey = (input: WordEnrichmentInput) =>
+    `${(input.word || '').toLowerCase().trim()}|${(input.context || '').trim()}`;
+
 export async function enrichWord(input: WordEnrichmentInput): Promise<EnrichedWordOutput> {
+    const key = cacheKey(input);
+    const cached = enrichmentCache.get(key);
+    if (cached) {
+        console.log(`[AI] enrich-word cache HIT for "${input.word}"`);
+        return cached;
+    }
     try {
         // Direct generation without defineFlow for maximum reliability and better error handling
-        return await executeWithRetry(async (aiInstance) => {
+        const result = await executeWithRetry(async (aiInstance) => {
             const { output } = await aiInstance.generate({
                 prompt: renderPrompt(input),
                 output: { schema: EnrichedWordSchema },
@@ -139,6 +161,13 @@ export async function enrichWord(input: WordEnrichmentInput): Promise<EnrichedWo
 
             return output as EnrichedWordOutput;
         });
+        if (enrichmentCache.size >= CACHE_MAX_ENTRIES) {
+            // Simple FIFO eviction to keep memory bounded in a long-running server.
+            const firstKey = enrichmentCache.keys().next().value;
+            if (firstKey) enrichmentCache.delete(firstKey);
+        }
+        enrichmentCache.set(key, result);
+        return result;
     } catch (err: any) {
         console.error("[AI Flow Error]:", err);
 
