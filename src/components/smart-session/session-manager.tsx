@@ -361,7 +361,8 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                 }
             } else {
                 // FORGOT WORD LOGIC:
-                setRefreshWords(prev => new Set(prev).add(currentItem.id));
+                // We always reset this word's recognition hits so it gets re-drilled
+                // inside the current phase, and record the fail for SRS.
                 setRecognitionHits(prev => ({ ...prev, [currentItem.id]: 0 }));
                 setResults(prev => ({ ...prev, [currentItem.id]: 'fail' }));
 
@@ -370,10 +371,22 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                     updateItemStatus(currentItem.id, 'fail', confusedWithId);
                 }
 
-                // Jump back to Priming (or stay in recognition if we decide so, but current logic jumps back)
-                // Since my new logic skips priming in review-only, it will just jump back to phase start.
-                setCurrentPhase('priming');
-                setPhaseIndex(0);
+                // Only bounce the WHOLE batch back to Priming when the failed word
+                // is genuinely new — i.e. we still owe the user a first exposure.
+                // For already-seen words, sending the whole batch back through
+                // Priming → Recognition × 2 directions multiplies session length
+                // without improving retention; keep drilling inside Recognition
+                // and let SRS lower the interval for the failed word.
+                const isTrulyNew = currentItem.status === 'new';
+                if (isTrulyNew) {
+                    setRefreshWords(prev => new Set(prev).add(currentItem.id));
+                    setCurrentPhase('priming');
+                    setPhaseIndex(0);
+                } else {
+                    // Stay in recognition, advance to next pending word so the
+                    // failed item cycles back via the `pendingWords` selector.
+                    setPhaseIndex(i => i + 1);
+                }
             }
         }
         else if (currentPhase === 'narrative') {
