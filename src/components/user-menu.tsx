@@ -11,7 +11,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Settings, AlertCircle, RotateCcw, Download, Upload, Database } from 'lucide-react';
+import { User, Settings, AlertCircle, RotateCcw, Download, Upload, Database, BarChart3 } from 'lucide-react';
+import Link from 'next/link';
 import { storage } from '@/lib/storage';
 import { useState } from 'react';
 import {
@@ -92,6 +93,12 @@ export function UserMenu() {
                     >
                         <Settings className="mr-2 h-4 w-4" />
                         <span>Настройки</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                        <Link href="/stats" className="cursor-pointer">
+                            <BarChart3 className="mr-2 h-4 w-4" />
+                            <span>Статистика</span>
+                        </Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
