@@ -144,25 +144,6 @@ export const storage = {
         await applyDefaultSeedIfFresh();
     },
 
-    /**
-     * Force-reapply the bundled seed, wiping any existing learning data on
-     * this device. Used by the "Сбросить до seed" action in the UI.
-     */
-    resetToSeed: async (): Promise<void> => {
-        if (typeof window === 'undefined') return;
-        const validKeys = Object.values(KEYS);
-        for (const key of validKeys) {
-            delete memoryCache[key];
-            try {
-                if (activeStorageEngine === 'IndexedDB') await localforage.removeItem(key);
-                window.localStorage.removeItem(key);
-            } catch { /* noop */ }
-        }
-        try { window.localStorage.removeItem(SEED_APPLIED_KEY); } catch { /* noop */ }
-        await applyDefaultSeedIfFresh();
-        window.location.reload();
-    },
-
     isCloudSyncEnabled: (): boolean => false,
     setCloudSyncEnabled: (enabled: boolean) => {
         // No-op in local-only mode
@@ -240,6 +221,14 @@ export const storage = {
         return updated;
     },
 
+    /**
+     * Reset learning progress only. Intentionally PRESERVES the word catalog
+     * (custom folders, their entries, mnemonics, AI enrichments) because those
+     * represent hours of user work. Only SRS state, session history, known
+     * words, curriculum progress and local retention telemetry are wiped.
+     *
+     * Called from the user menu behind a two-step confirmation dialog.
+     */
     resetAllProgress: async () => {
         if (typeof window === 'undefined') return;
 
@@ -264,6 +253,10 @@ export const storage = {
             window.localStorage.removeItem(KEYS.KNOWN_WORDS);
             window.localStorage.removeItem(KEYS.DAILY_SESSION);
         }
+
+        // Retention log is a separate localStorage key owned by retention-log.ts
+        // We clear it here so “сброс прогресса” really means a clean slate.
+        try { window.localStorage.removeItem('retention-log-v1'); } catch { /* noop */ }
 
         const folders = storage.getCustomFolders();
         const resetFolders = folders.map(folder => ({
