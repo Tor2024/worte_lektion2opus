@@ -147,6 +147,18 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
 
     const totalBatches = Math.ceil(sessionQueue.length / BATCH_SIZE);
 
+    // Words actually shown during the current Priming sub-phase. We mirror the
+    // smart-skip filter from `currentItem` so the counter doesn't display
+    // "1/4" when only 2 of 4 words actually visit Priming this session.
+    // NOTE: must live above the early returns below — React requires a stable
+    // hook count across renders.
+    const primingWords = useMemo(() => currentBatchWords.filter(w => {
+        const isNew = w.status === 'new';
+        const isRefresh = refreshWords.has(w.id);
+        const isShortInterval = (w.interval || 0) < 7;
+        return isNew || isRefresh || isShortInterval;
+    }), [currentBatchWords, refreshWords]);
+
     // Derived: Current item based on phaseIndex within current batch
     const currentItem = useMemo(() => {
         if (currentPhase === 'priming') {
@@ -361,7 +373,8 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                 }
             } else {
                 // FORGOT WORD LOGIC:
-                setRefreshWords(prev => new Set(prev).add(currentItem.id));
+                // We always reset this word's recognition hits so it gets re-drilled
+                // inside the current phase, and record the fail for SRS.
                 setRecognitionHits(prev => ({ ...prev, [currentItem.id]: 0 }));
                 setResults(prev => ({ ...prev, [currentItem.id]: 'fail' }));
 
@@ -370,10 +383,22 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                     updateItemStatus(currentItem.id, 'fail', confusedWithId);
                 }
 
-                // Jump back to Priming (or stay in recognition if we decide so, but current logic jumps back)
-                // Since my new logic skips priming in review-only, it will just jump back to phase start.
-                setCurrentPhase('priming');
-                setPhaseIndex(0);
+                // Only bounce the WHOLE batch back to Priming when the failed word
+                // is genuinely new — i.e. we still owe the user a first exposure.
+                // For already-seen words, sending the whole batch back through
+                // Priming → Recognition × 2 directions multiplies session length
+                // without improving retention; keep drilling inside Recognition
+                // and let SRS lower the interval for the failed word.
+                const isTrulyNew = currentItem.status === 'new';
+                if (isTrulyNew) {
+                    setRefreshWords(prev => new Set(prev).add(currentItem.id));
+                    setCurrentPhase('priming');
+                    setPhaseIndex(0);
+                } else {
+                    // Stay in recognition, advance to next pending word so the
+                    // failed item cycles back via the `pendingWords` selector.
+                    setPhaseIndex(i => i + 1);
+                }
             }
         }
         else if (currentPhase === 'narrative') {
@@ -710,16 +735,6 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
 
     const progressValue = ((currentBatchIndex * 3 + (currentPhase === 'priming' ? 0 : currentPhase === 'recognition' ? 1 : 2)) / (totalBatches * 3)) * 100;
 
-    // Words actually shown during the current Priming sub-phase. We mirror the
-    // smart-skip filter from `currentItem` so the counter doesn't display
-    // "1/4" when only 2 of 4 words actually visit Priming this session.
-    const primingWords = useMemo(() => currentBatchWords.filter(w => {
-        const isNew = w.status === 'new';
-        const isRefresh = refreshWords.has(w.id);
-        const isShortInterval = (w.interval || 0) < 7;
-        return isNew || isRefresh || isShortInterval;
-    }), [currentBatchWords, refreshWords]);
-
     // Phase relative progress
     const phaseProgressValue = currentPhase === 'priming'
         ? (phaseIndex / (primingWords.length || 1)) * 100
@@ -792,6 +807,12 @@ export function SmartSessionManager({ folderId }: SmartSessionManagerProps) {
                                     direction={(recognitionHits[currentItem.id] || 0) % 2 === 0 ? 0 : 1}
                                     distractorPool={sessionQueue}
                                     audioFirst={!!settings.audioFirst}
+                                    // Variety: first hit is classic MCQ (DE→RU), second hit
+                                    // uses cloze over the example sentence so the learner
+                                    // meets the word in its natural context instead of
+                                    // answering the same shape twice in a row. Cloze
+                                    // transparently falls back to MCQ if no example exists.
+                                    format={(recognitionHits[currentItem.id] || 0) % 2 === 1 ? 'cloze' : 'mcq'}
                                 />
                             </div>
                         )}

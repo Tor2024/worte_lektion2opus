@@ -39,6 +39,60 @@ const defaultSettings: AppSettings = {
 const memoryCache: Record<string, any> = {};
 let activeStorageEngine: 'LocalStorage' | 'IndexedDB' = 'LocalStorage';
 
+// Marker that the seed has been applied at least once on this device. This is
+// distinct from the actual data keys so that if the user manually deletes
+// everything we do NOT silently re-seed on top (they explicitly asked for a
+// wipe). "Reset to seed" from the UI clears this marker too.
+const SEED_APPLIED_KEY = 'deutsch-seed-applied-v1';
+const SEED_ASSET_URL = '/seed.json';
+
+/**
+ * On a fresh device (no custom folders yet and no "seed applied" marker),
+ * pull the bundled default dataset from `/seed.json` and populate every
+ * storage key it contains. Called from `initStorage` after the regular
+ * load/migrate step. Safe to call multiple times — subsequent calls no-op.
+ */
+async function applyDefaultSeedIfFresh(): Promise<void> {
+    if (typeof window === 'undefined') return;
+
+    try {
+        const alreadyApplied = window.localStorage.getItem(SEED_APPLIED_KEY);
+        const hasFolders = Array.isArray(memoryCache[KEYS.CUSTOM_FOLDERS]) && memoryCache[KEYS.CUSTOM_FOLDERS].length > 0;
+        const hasQueue = Array.isArray(memoryCache[KEYS.STUDY_QUEUE]) && memoryCache[KEYS.STUDY_QUEUE].length > 0;
+        if (alreadyApplied || hasFolders || hasQueue) {
+            // Either we already seeded this device, or the user has real data
+            // (imported, migrated from another device, or manually added).
+            // In both cases we leave things alone.
+            return;
+        }
+
+        const res = await fetch(SEED_ASSET_URL, { cache: 'force-cache' });
+        if (!res.ok) {
+            console.warn(`[seed] /seed.json fetch failed: ${res.status}`);
+            return;
+        }
+        const seed = await res.json() as Record<string, unknown>;
+
+        const validKeys = Object.values(KEYS);
+        for (const [key, value] of Object.entries(seed)) {
+            if (!validKeys.includes(key as any)) continue;
+            memoryCache[key] = value;
+            if (activeStorageEngine === 'IndexedDB') {
+                try { await localforage.setItem(key, value); } catch (e) { console.warn('[seed] IDB write failed', e); }
+            } else {
+                try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { console.warn('[seed] LS write failed', e); }
+            }
+        }
+
+        window.localStorage.setItem(SEED_APPLIED_KEY, String(Date.now()));
+        console.info('[seed] Default dataset applied to fresh device.');
+    } catch (e) {
+        // Never let a seed failure block the app. The user can still add
+        // words manually or import a backup from settings.
+        console.warn('[seed] Failed to apply default seed', e);
+    }
+}
+
 export const storage = {
     getActiveEngine: () => activeStorageEngine,
 
@@ -83,6 +137,11 @@ export const storage = {
                 }
             }
         }
+
+        // After the regular load, if this device has never been seeded and
+        // is still empty, populate the bundled default dataset so the user
+        // lands in an already-useful state on every fresh install.
+        await applyDefaultSeedIfFresh();
     },
 
     isCloudSyncEnabled: (): boolean => false,
@@ -162,6 +221,14 @@ export const storage = {
         return updated;
     },
 
+    /**
+     * Reset learning progress only. Intentionally PRESERVES the word catalog
+     * (custom folders, their entries, mnemonics, AI enrichments) because those
+     * represent hours of user work. Only SRS state, session history, known
+     * words, curriculum progress and local retention telemetry are wiped.
+     *
+     * Called from the user menu behind a two-step confirmation dialog.
+     */
     resetAllProgress: async () => {
         if (typeof window === 'undefined') return;
 
@@ -186,6 +253,10 @@ export const storage = {
             window.localStorage.removeItem(KEYS.KNOWN_WORDS);
             window.localStorage.removeItem(KEYS.DAILY_SESSION);
         }
+
+        // Retention log is a separate localStorage key owned by retention-log.ts
+        // We clear it here so “сброс прогресса” really means a clean slate.
+        try { window.localStorage.removeItem('retention-log-v1'); } catch { /* noop */ }
 
         const folders = storage.getCustomFolders();
         const resetFolders = folders.map(folder => ({

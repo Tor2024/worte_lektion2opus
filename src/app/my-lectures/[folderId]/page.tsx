@@ -179,42 +179,53 @@ export default function FolderDetailsPage({ params }: { params: Promise<{ folder
         }
     };
 
-    // Queue-based batch processing to prevent timeouts and data loss
-    const processBatchQueue = async (wordsToProcess: UserVocabularyWord[], index: number, skippedCount: number = 0) => {
-        if (index >= wordsToProcess.length) {
-            setIsBatchRefreshing(false);
-            setRefreshProgress('');
-            if (skippedCount > 0) {
-                alert(`Обновление завершено. ${wordsToProcess.length - skippedCount} обновлено, ${skippedCount} пропущено.`);
+    // Parallel batch processing: we fan out enrich calls in small chunks so the
+    // Gemini key-pool can be exercised in parallel instead of strictly serially.
+    // Previously we waited for each word to finish (~8s avg * N words). With a
+    // pool of 15+ keys available, running CHUNK_SIZE requests concurrently
+    // gives a near-linear speed-up without exhausting any single key's RPM
+    // (Gemini free tier is 15 RPM per key, so 8 concurrent across 15 keys is
+    // comfortable and leaves headroom for retries / other enrich paths).
+    const CHUNK_SIZE = 8;
+    const processBatchQueue = async (wordsToProcess: UserVocabularyWord[], _startIndex: number = 0, _initialSkipped: number = 0) => {
+        let completed = 0;
+        let skipped = 0;
+        let rateLimitHit = false;
+
+        for (let i = 0; i < wordsToProcess.length && !rateLimitHit; i += CHUNK_SIZE) {
+            const chunk = wordsToProcess.slice(i, i + CHUNK_SIZE);
+
+            // Pre-filter: standardized words don't need re-enrichment.
+            const needsEnrich = chunk.filter(w => !(isWordStandardized(w) && !w.needsUpdate));
+            skipped += chunk.length - needsEnrich.length;
+
+            setRefreshProgress(`${Math.min(i + CHUNK_SIZE, wordsToProcess.length)} / ${wordsToProcess.length} (Пропущено: ${skipped})`);
+
+            const results = await Promise.allSettled(
+                needsEnrich.map(w => handleRefreshWord(w))
+            );
+
+            for (const r of results) {
+                if (r.status === 'fulfilled') {
+                    completed += 1;
+                } else {
+                    const msg = (r.reason && r.reason.message) || '';
+                    if (msg === 'AI_LIMIT') {
+                        rateLimitHit = true;
+                    } else {
+                        console.error('[batch-refresh] word failed', r.reason);
+                    }
+                }
             }
-            return;
         }
 
-        const word = wordsToProcess[index];
-        setRefreshProgress(`${index + 1} / ${wordsToProcess.length} (Пропущено: ${skippedCount})`);
+        setIsBatchRefreshing(false);
+        setRefreshProgress('');
 
-        // SMART SKIP
-        if (isWordStandardized(word) && !word.needsUpdate) {
-            processBatchQueue(wordsToProcess, index + 1, skippedCount + 1);
-            return;
-        }
-
-        try {
-            await handleRefreshWord(word);
-
-            // Small delay to prevent rate limits
-            setTimeout(() => {
-                processBatchQueue(wordsToProcess, index + 1, skippedCount);
-            }, 1000);
-        } catch (err: any) {
-            if (err.message === "AI_LIMIT") {
-                setError("Лимит AI исчерпан. Обновление приостановлено.");
-                setIsBatchRefreshing(false);
-                setRefreshProgress('');
-            } else {
-                console.error(`Failed to refresh word ${word.word.german}`, err);
-                processBatchQueue(wordsToProcess, index + 1, skippedCount);
-            }
+        if (rateLimitHit) {
+            setError('Лимит AI исчерпан. Обновление приостановлено.');
+        } else if (skipped > 0) {
+            alert(`Обновление завершено. ${completed} обновлено, ${skipped} пропущено.`);
         }
     };
 

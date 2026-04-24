@@ -11,7 +11,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Settings, AlertCircle, RotateCcw, Download, Upload, Database } from 'lucide-react';
+import { User, Settings, AlertCircle, RotateCcw, Download, Upload, Database, BarChart3 } from 'lucide-react';
+import Link from 'next/link';
 import { storage } from '@/lib/storage';
 import { useState } from 'react';
 import {
@@ -93,6 +94,12 @@ export function UserMenu() {
                         <Settings className="mr-2 h-4 w-4" />
                         <span>Настройки</span>
                     </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                        <Link href="/stats" className="cursor-pointer">
+                            <BarChart3 className="mr-2 h-4 w-4" />
+                            <span>Статистика</span>
+                        </Link>
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                         className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer"
@@ -102,7 +109,7 @@ export function UserMenu() {
                         }}
                     >
                         <RotateCcw className="mr-2 h-4 w-4" />
-                        <span>Сброс прогресса</span>
+                        <span>Сбросить прогресс изучения</span>
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -111,10 +118,10 @@ export function UserMenu() {
             <AlertDialog open={confirmStep === 1} onOpenChange={(open) => !open && setConfirmStep(0)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Вы уверены?</AlertDialogTitle>
+                        <AlertDialogTitle>Сбросить прогресс изучения?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Это сбросит весь прогресс обучения, включая уровни владения словами и статистику сессий.
-                            Ваши папки и слова останутся, но они снова станут "новыми" для изучения.
+                            <strong>Слова и папки не будут удалены</strong> — это значительный труд.<br /><br />
+                            Сбросится только прогресс изучения: SRS-интервалы, статусы слов (new/learning/review), история сессий, лог ретеншена. Все слова вашего словаря с их переводами, мнемониками и примерами сохраняются — просто станут снова «новыми» для изучения.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -138,7 +145,7 @@ export function UserMenu() {
                             Окончательное подтверждение
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            Это действие невозможно отменить. Вы действительно хотите полностью сбросить свой прогресс и начать сначала?
+                            Это нельзя отменить. Слова останутся в словаре — нулеватся только ваш прогресс по ним. Продолжить?
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -147,7 +154,7 @@ export function UserMenu() {
                             onClick={() => storage.resetAllProgress()}
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                         >
-                            СБРОСИТЬ ВСЁ
+                            Сбросить прогресс (слова сохраняются)
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

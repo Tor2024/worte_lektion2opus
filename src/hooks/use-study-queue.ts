@@ -5,6 +5,7 @@ import { storage } from '@/lib/storage';
 import { StudyQueueItem } from '@/lib/types';
 import { useCustomFolders } from './use-custom-folders';
 import { generateMnemonic } from '@/ai/flows/generate-mnemonic';
+import { logRetentionEvent } from '@/lib/retention-log';
 
 export function useStudyQueue() {
     const [localQueue, setLocalQueue] = useState<StudyQueueItem[]>([]);
@@ -341,7 +342,7 @@ export function useStudyQueue() {
         return { items: finalSelection, mode: 'learning' as SessionMode, sessionNumber };
     }, [localQueue]);
 
-    const updateItemStatus = useCallback(async (wordId: string, result: 'success' | 'fail', confusedWithId?: string) => {
+    const updateItemStatus = useCallback(async (wordId: string, result: 'success' | 'fail', confusedWithId?: string, phase?: 'recognition' | 'production' | 'narrative' | 'review') => {
         const item = localQueue.find((i: any) => i.id === wordId);
         if (!item) return;
 
@@ -437,6 +438,21 @@ export function useStudyQueue() {
         );
         setLocalQueue(nextQueue);
         storage.setStudyQueue(nextQueue);
+
+        // Fire-and-forget telemetry. Captured *after* SRS update so interval
+        // / ease reflect the post-event state, which is what pattern analysis
+        // actually wants ("word X was forgotten when interval was 15 days").
+        logRetentionEvent({
+            wordId,
+            german: item.word.german,
+            russian: item.word.russian,
+            outcome: result,
+            timestamp: Date.now(),
+            interval: nextInterval,
+            easeFactor: nextEase,
+            consecutiveMistakes: newMistakes,
+            phase,
+        });
     }, [localQueue]);
 
     const updateMnemonic = useCallback(async (wordId: string, mnemonic: string) => {
