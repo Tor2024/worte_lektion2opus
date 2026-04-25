@@ -10,11 +10,12 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, BookText, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, BookText, CheckCircle2, Shuffle } from 'lucide-react';
 import Link from 'next/link';
 import { useUserProgress } from '@/hooks/use-user-progress';
 import { cn } from '@/lib/utils';
 import { useLevelData } from '@/hooks/use-curriculum-data';
+import { useMemo } from 'react';
 
 export default function LevelPage() {
   const params = useParams<{ level: string }>();
@@ -22,6 +23,11 @@ export default function LevelPage() {
 
   const { level, topics, isLoading } = useLevelData(levelId);
   const { getTopicProficiency } = useUserProgress();
+
+  const eligibleForMix = useMemo(
+    () => (topics || []).some(t => getTopicProficiency(t.id) >= 60),
+    [topics, getTopicProficiency]
+  );
 
   if (isLoading) {
     return (
@@ -50,6 +56,25 @@ export default function LevelPage() {
         <h1 className="mt-2 text-4xl font-bold font-headline">{level.title}</h1>
         <p className="mt-2 text-lg text-muted-foreground">{level.description}</p>
       </div>
+
+      {eligibleForMix && (
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-full bg-primary/15 p-2 text-primary">
+              <Shuffle className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold">Микс уровня — слова из всех пройденных тем вперемешку</p>
+              <p className="text-sm text-muted-foreground">5 минут, 10 вопросов. Лучшее, что есть для долгой памяти.</p>
+            </div>
+          </div>
+          <Button asChild>
+            <Link href={`/${level.id}/mix`}>
+              Запустить микс <Shuffle className="ml-2 h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
+      )}
 
       {topics && topics.length > 0 ? (
         <Accordion type="single" collapsible className="w-full">

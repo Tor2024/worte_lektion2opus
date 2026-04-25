@@ -28,6 +28,8 @@ import { evaluateRoleplay } from "@/ai/flows/evaluate-roleplay";
 import { RoleplayInterface } from "./roleplay-interface";
 import { formatGermanWord } from "@/lib/german-utils";
 import { ExitTicket } from "./exit-ticket";
+import { MistakeReplay } from "./mistake-replay";
+import { appendTopicMistake, clearTopicMistakes, getTopicMistakes, TopicMistake } from "@/lib/topic-mistakes";
 
 type Feedback = {
   type: "correct" | "incorrect";
@@ -43,7 +45,7 @@ type SentenceConstructionExercise = {
   correctSentence: string;
 }
 
-type Step = 'learning' | 'vocabulary' | 'reading' | 'comprehension' | 'grammar' | 'sentence-construction' | 'explanation' | 'roleplay' | 'exit-ticket' | 'mastered' | 'loading' | 'error';
+type Step = 'mistake-replay' | 'learning' | 'vocabulary' | 'reading' | 'comprehension' | 'grammar' | 'sentence-construction' | 'explanation' | 'roleplay' | 'exit-ticket' | 'mastered' | 'loading' | 'error';
 
 export type LessonScore = { correct: number; total: number };
 
@@ -95,6 +97,7 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
   const [learningQueue, setLearningQueue] = useState<VocabularyWord[]>([]);
   const [learningFeedback, setLearningFeedback] = useState<Feedback>(null);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [pendingMistakes, setPendingMistakes] = useState<TopicMistake[]>([]);
 
   const exerciseHistoryRef = useRef(exerciseHistory);
 
@@ -266,7 +269,16 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
       // Logic for Topics: Check if we need to do learning
       // We assume every new topic mount needs learning phase first
       setLearningQueue(allWords.map(w => w as VocabularyWord));
-      setCurrentStep('learning');
+
+      // Mistake replay: if the previous session left up to 5 mistakes, surface
+      // them as a quick recall warm-up before the regular learning step.
+      const stored = topic ? getTopicMistakes(topic.id) : [];
+      if (stored.length > 0) {
+        setPendingMistakes(stored);
+        setCurrentStep('mistake-replay');
+      } else {
+        setCurrentStep('learning');
+      }
       setIsGenerating(false);
       isInitializedRef.current = true;
     } else {
@@ -486,6 +498,9 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
 
       const isCorrect = verification.isCorrect;
       addHistoryAndProficiency(question, userAnswer, isCorrect);
+      if (!isCorrect && topic) {
+        appendTopicMistake(topic.id, question, correctAnswer);
+      }
 
       if (!isCorrect) {
         // Retry Logic: Add failed exercise to the end of the queue
@@ -608,6 +623,20 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     }
 
     switch (currentStep) {
+      case 'mistake-replay': {
+        if (!topic) return null;
+        return (
+          <MistakeReplay
+            mistakes={pendingMistakes}
+            onDone={() => {
+              clearTopicMistakes(topic.id);
+              setPendingMistakes([]);
+              setCurrentStep('learning');
+            }}
+          />
+        );
+      }
+
       case 'exit-ticket': {
         if (!topic) return null;
         return (
