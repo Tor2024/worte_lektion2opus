@@ -1,21 +1,35 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Topic } from '@/lib/types';
+import { Topic, INITIAL_SM2_STATE, SM2State } from '@/lib/types';
 import { useUserProgress } from '@/hooks/use-user-progress';
 import { GenerateLessonSummaryOutput } from '@/ai/flows/generate-lesson-summary';
-import { ExerciseEngine } from './exercise-engine';
+import { ExerciseEngine, LessonScore } from './exercise-engine';
 import { Timer } from './timer';
 import { Button } from './ui/button';
 import { Loader2, Brain, RefreshCw, SkipForward } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import Link from 'next/link';
 import { useLevelData } from '@/hooks/use-curriculum-data';
+import { updateSM2State } from '@/lib/sm2';
+import { addTopicWordsToQueue } from '@/lib/course-bridge';
 
 type RepetitionState = {
   nextReviewDate: string | null;
   lastReviewTime: number | null;
+  sm2?: SM2State;
 };
+
+// Map exit-ticket score (correct/total) to SM2 quality (0..5).
+// total === 0 means there was no cloze data — assume "good" (q=4).
+function scoreToQuality(score?: LessonScore): number {
+  if (!score || score.total === 0) return 4;
+  const ratio = score.correct / score.total;
+  if (ratio >= 1) return 5;
+  if (ratio >= 2 / 3) return 4;
+  if (ratio >= 1 / 3) return 2;
+  return 1;
+}
 
 export function SpacedRepetitionWrapper({ topic }: { topic: Topic }) {
   const { setTopicProficiency } = useUserProgress(topic.id);
@@ -53,26 +67,38 @@ export function SpacedRepetitionWrapper({ topic }: { topic: Topic }) {
     setIsLoading(false);
   }, [getRepetitionState]);
 
-  const onMastered = useCallback((summary?: GenerateLessonSummaryOutput) => {
+  const onMastered = useCallback((summary?: GenerateLessonSummaryOutput, score?: LessonScore) => {
     if (summary) {
       setLessonSummary(summary);
     }
 
-    const nextReviewDate = new Date();
-    nextReviewDate.setDate(nextReviewDate.getDate() + 1); // Simple 1 day interval
+    const previous = (repetitionState?.sm2 ?? INITIAL_SM2_STATE);
+    const quality = scoreToQuality(score);
+    const nextSm2 = updateSM2State(quality, previous);
+    const nextDate = nextSm2.nextReviewDate ? new Date(nextSm2.nextReviewDate) : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const newState: RepetitionState = {
-      nextReviewDate: nextReviewDate.toISOString(),
-      lastReviewTime: new Date().getTime(),
+      nextReviewDate: nextDate.toISOString(),
+      lastReviewTime: Date.now(),
+      sm2: nextSm2,
     };
 
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`repetition-${topic.id}`, JSON.stringify(newState));
     }
     setRepetitionState(newState);
-    setNextReviewDate(nextReviewDate);
+    setNextReviewDate(nextDate);
     setIsReadyForReview(false);
-  }, [topic.id]);
+
+    // Bridge: feed topic vocabulary into the global SRS study queue so daily
+    // sessions keep the words alive instead of relying on the topic-only timer.
+    try {
+      const topicWords = topic.vocabulary.flatMap(v => v.words);
+      addTopicWordsToQueue(topic.levelId, topic.title, topicWords);
+    } catch (e) {
+      console.error('Failed to bridge topic words to study queue:', e);
+    }
+  }, [topic.id, topic.levelId, topic.title, topic.vocabulary, repetitionState]);
 
   const handleReset = () => {
     setIsLoading(true);
