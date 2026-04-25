@@ -27,6 +27,7 @@ import { startRoleplay, StartRoleplayOutput } from "@/ai/flows/start-roleplay";
 import { evaluateRoleplay } from "@/ai/flows/evaluate-roleplay";
 import { RoleplayInterface } from "./roleplay-interface";
 import { formatGermanWord } from "@/lib/german-utils";
+import { ExitTicket } from "./exit-ticket";
 
 type Feedback = {
   type: "correct" | "incorrect";
@@ -42,7 +43,9 @@ type SentenceConstructionExercise = {
   correctSentence: string;
 }
 
-type Step = 'learning' | 'vocabulary' | 'reading' | 'comprehension' | 'grammar' | 'sentence-construction' | 'explanation' | 'roleplay' | 'mastered' | 'loading' | 'error';
+type Step = 'learning' | 'vocabulary' | 'reading' | 'comprehension' | 'grammar' | 'sentence-construction' | 'explanation' | 'roleplay' | 'exit-ticket' | 'mastered' | 'loading' | 'error';
+
+export type LessonScore = { correct: number; total: number };
 
 
 type ExerciseHistoryItem = {
@@ -58,7 +61,7 @@ type ExerciseHistoryItem = {
 type ExerciseEngineProps = {
   topic?: Topic; // Make topic optional
   customWords?: UserVocabularyWord[]; // New prop
-  onMastered: (summary?: GenerateLessonSummaryOutput) => void;
+  onMastered: (summary?: GenerateLessonSummaryOutput, score?: LessonScore) => void;
   onWordUpdate?: (wordId: string, newState: SM2State) => void;
 }
 
@@ -346,9 +349,11 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     // Move to next valid step
     setCurrentExerciseIndex(0);
 
-    // Define the sequence
-    const stepOrder: Step[] = ['vocabulary', 'reading', 'comprehension', 'grammar', 'sentence-construction', 'explanation', 'roleplay', 'mastered'];
+    // Define the sequence (exit-ticket is the gate before mastered)
+    const stepOrder: Step[] = ['vocabulary', 'reading', 'comprehension', 'grammar', 'sentence-construction', 'explanation', 'roleplay', 'exit-ticket', 'mastered'];
     const currentOrderIdx = stepOrder.indexOf(currentStep);
+
+    const hasExitTicketCandidates = !!topic && allWords.some(w => typeof (w as { example?: string }).example === 'string' && (w as { example?: string }).example!.length > 0);
 
     for (let i = currentOrderIdx + 1; i < stepOrder.length; i++) {
       const nextStep = stepOrder[i];
@@ -361,6 +366,7 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
       else if (nextStep === 'sentence-construction' && sentenceConstructionExercises.length > 0) hasContent = true;
       else if (nextStep === 'explanation' && exerciseData?.explanation) hasContent = true;
       else if (nextStep === 'roleplay' && topic) hasContent = true; // Review: Always attempt roleplay if topic exists?
+      else if (nextStep === 'exit-ticket' && hasExitTicketCandidates) hasContent = true;
       else if (nextStep === 'mastered') hasContent = true; // Always valid end
 
       if (hasContent) {
@@ -374,7 +380,7 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     }
   }
 
-  const handleFinishLesson = async () => {
+  const handleFinishLesson = async (score?: LessonScore) => {
     setCurrentStep('loading');
     setIsGenerating(true);
     try {
@@ -391,23 +397,31 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
         setLessonSummary(summary);
       }
 
-      // Mark as mastered with 100% proficiency
+      // Mark as mastered: 100% if exit-ticket score >= 2/3 (or skipped), else 80%
       if (topic) {
-        setTopicProficiency(100);
+        const passed = !score || score.total === 0 || score.correct / score.total >= 2 / 3;
+        setTopicProficiency(passed ? 100 : 80);
       }
 
-      onMastered(summary);
+      onMastered(summary, score);
       setCurrentStep('mastered');
     } catch (e) {
       console.error("Failed to generate lesson summary:", e);
       // Proceed anyway but without summary
-      if (topic) setTopicProficiency(100);
-      onMastered();
+      if (topic) {
+        const passed = !score || score.total === 0 || score.correct / score.total >= 2 / 3;
+        setTopicProficiency(passed ? 100 : 80);
+      }
+      onMastered(undefined, score);
       setCurrentStep('mastered');
     } finally {
       setIsGenerating(false);
     }
   };
+
+  const handleExitTicketDone = useCallback((correct: number, total: number) => {
+    handleFinishLesson({ correct, total });
+  }, []);
 
 
   const handleSubmitExercise = async (e?: React.FormEvent) => {
@@ -594,6 +608,13 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     }
 
     switch (currentStep) {
+      case 'exit-ticket': {
+        if (!topic) return null;
+        return (
+          <ExitTicket words={allWords} onDone={handleExitTicketDone} />
+        );
+      }
+
       case 'reading': {
         if (!exerciseData) return null;
         return (
