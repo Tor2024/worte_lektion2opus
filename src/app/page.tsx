@@ -28,6 +28,7 @@ import { useUnifiedSRS } from '@/hooks/use-unified-srs';
 import { NeuralMap } from '@/components/neural-map';
 import { storage } from '@/lib/storage';
 import { useCurriculumData } from '@/hooks/use-curriculum-data';
+import { DecayNudge } from '@/components/decay-nudge';
 
 function DailySessionWidget() {
   const {
@@ -395,6 +396,8 @@ export default function DashboardPage() {
         <MyDictionariesWidget />
         <WritingTrainingWidget />
       </div>
+
+      <DecayNudge />
 
       <h2 className="text-3xl font-bold font-headline mb-6 text-center">Уровни обучения</h2>
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
