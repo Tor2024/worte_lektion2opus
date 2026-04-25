@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { SpacedRepetitionWrapper } from '@/components/spaced-repetition-wrapper';
 import { useTopicData } from '@/hooks/use-curriculum-data';
 import { TopicVocabulary } from '@/components/topic-vocabulary';
-import { AiTheoryExpander } from '@/components/ai-theory-expander';
+import { TheoryEngagement } from '@/components/theory-engagement';
 
 export default function TopicPage() {
   const params = useParams<{ level: string; topic: string }>();
@@ -86,7 +86,12 @@ export default function TopicPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <AiTheoryExpander title={topic.title} initialHtml={topic.explanation} />
+            <TheoryEngagement
+              title={topic.title}
+              initialHtml={topic.explanation}
+              words={allWords}
+              topicId={topic.id}
+            />
           </CardContent>
         </Card>
 
