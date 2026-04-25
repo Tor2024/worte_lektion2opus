@@ -1,6 +1,15 @@
 import { storage } from './storage';
 import { CustomFolder, INITIAL_SM2_STATE, VocabularyWord } from './types';
 
+function getKnownGermanSet(): Set<string> {
+    if (typeof window === 'undefined') return new Set();
+    try {
+        return new Set(storage.getKnownWords());
+    } catch {
+        return new Set();
+    }
+}
+
 /**
  * Adds the topic's vocabulary into a dedicated "Курс: ..." custom folder.
  * useStudyQueue.syncWithFolders will pick the new entries up automatically and
@@ -35,10 +44,13 @@ export function addTopicWordsToQueue(
     }
 
     const existingGerman = new Set(folder.words.map(w => w.word.german));
+    const knownGerman = getKnownGermanSet();
     let added = 0;
     for (const w of words) {
         if (!w?.german) continue;
         if (existingGerman.has(w.german)) continue;
+        // Active vocabulary: skip words the user marked as already known.
+        if (knownGerman.has(w.german)) continue;
         folder.words.unshift({
             id: w.german,
             word: w,

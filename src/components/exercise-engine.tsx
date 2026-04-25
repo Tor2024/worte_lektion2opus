@@ -266,9 +266,10 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
     if (isInitializedRef.current || (!topic && !customWords)) return;
 
     if (allWords.length > 0 && !customWords) {
-      // Logic for Topics: Check if we need to do learning
-      // We assume every new topic mount needs learning phase first
-      setLearningQueue(allWords.map(w => w as VocabularyWord));
+      // Logic for Topics: skip words the user already marked as known so the
+      // learning phase only spends effort on what is genuinely new.
+      const filtered = allWords.filter(w => !isKnown(w.german)) as VocabularyWord[];
+      setLearningQueue(filtered);
 
       // Mistake replay: if the previous session left up to 5 mistakes, surface
       // them as a quick recall warm-up before the regular learning step.
@@ -276,8 +277,11 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
       if (stored.length > 0) {
         setPendingMistakes(stored);
         setCurrentStep('mistake-replay');
-      } else {
+      } else if (filtered.length > 0) {
         setCurrentStep('learning');
+      } else {
+        // Everything in the topic is already known — go straight to AI exercises.
+        startExerciseCycle();
       }
       setIsGenerating(false);
       isInitializedRef.current = true;
@@ -733,6 +737,20 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
           setUserAnswer('');
         };
 
+        const handleAlreadyKnown = () => {
+          // Active vocabulary mode: user marks word as already known. We add it
+          // to the global known set (so AI exercises and mix sessions skip it)
+          // and drop it from the current learning queue without grading it.
+          addKnownWord(learningWord.german);
+          const newQueue = learningQueue.slice(1);
+          setLearningQueue(newQueue);
+          setLearningFeedback(null);
+          setUserAnswer('');
+          if (newQueue.length === 0) {
+            startExerciseCycle();
+          }
+        };
+
         return (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -779,6 +797,15 @@ export function ExerciseEngine({ topic, customWords, onMastered, onWordUpdate }:
                       />
                     </div>
                     <Button type="submit" className="w-full h-12 text-lg" disabled={!userAnswer}>Проверить</Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-muted-foreground hover:text-foreground"
+                      onClick={handleAlreadyKnown}
+                    >
+                      Это слово я уже знаю — пропустить
+                    </Button>
                   </form>
                 )}
               </CardContent>
