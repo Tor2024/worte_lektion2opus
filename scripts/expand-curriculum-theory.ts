@@ -47,8 +47,8 @@ async function main() {
     const todo = tasks.filter(t => !checkpoint[t.id] || checkpoint[t.id].length < 1500);
     console.log(`[expand] ${tasks.length} topics total, ${tasks.length - todo.length} cached, ${todo.length} to generate.`);
 
-    const CONCURRENCY = 2;
-    const PER_CALL_DELAY_MS = 6000;
+    const CONCURRENCY = 1;
+    const PER_CALL_DELAY_MS = 14000;
     let cursor = 0;
     let done = 0;
     const total = todo.length;
